@@ -1,7 +1,7 @@
 # Monitoramento de Temperatura, Umidade e Luminosidade 
 ![Logo TermoLight](./images/termolight.png)</div>
 
-O projeto permite o monitoramento de temperatura, umidade e luminosidade de um ambiente, utilizando um ESP32, comunicação MQTT para envio de dados em tempo real e armazenamento de dados no MongoDB e SQL. Este repositório contém o código necessário para conectar-se a uma rede Wi-Fi e enviar dados para um Broker MQTT, bem como receber comandos para ligar e desligar um LED quando alguns dos parâmetros se encontra fora do intervalo ideal.  Os dados são inicialmente recebidos pelo MongoDB, depois enviados e armazenados no SQL. 
+O projeto permite o monitoramento de temperatura, umidade e luminosidade de um ambiente, utilizando um ESP32, comunicação MQTT para envio de dados em tempo real e armazenamento de dados no MongoDB e SQL. Este repositório contém o código necessário para conectar-se a uma rede Wi-Fi e enviar dados para um Broker MQTT, bem como receber comandos para ligar e desligar um LED quando alguns dos parâmetros se encontra fora do intervalo ideal.  Os dados são inicialmente recebidos pelo MongoDB, depois enviados e armazenados no SQL. <br>
 Além disso, implementa um painel para visualização de dados de luminosidade, temperatura e umidade coletados por um ESP32. Utiliza o Dash para criar uma interface web que exibe gráficos em tempo real, com dados obtidos de uma API e exibidos através de gráficos de linha, barras e pizza. 
 O projeto trabalha com as seguintes variáveis em seus respectivos intervalor e triggers:
 | Variável               | Intervalo  | Trigger (%) | Precisão do componente        |
@@ -17,7 +17,7 @@ O projeto trabalha com as seguintes variáveis em seus respectivos intervalor e 
 | Placa de prototipação     | Um equipamento usado para montar circuitos eletrônicos temporários sem a necessidade de solda, facilitando a experimentação. | <div align="center">![Protoboard](./images/Protoboard1.jpg)</div> |
 | ESP32                    | Responsável pela conectividade e comunicação com a plataforma FIWARE, o ESP32 opera em uma faixa de tensão de 0V a 3,3V e permite a transmissão de dados em tempo real. Amplamente utilizado em projetos de Internet das Coisas (IoT) devido sua conectividade Wi-Fi e Bluetooth integrada. Possui um LED onboard. | <div align="center">![ESP32](./images/MFG_ESP32-DEVKITC-VIE.jpg)</div> |
 | DHT11                    | Sensor digital que mede a temperatura e a umidade do ambiente. | <div align="center">![DHT11](./images/DHT11.jpeg)</div> |
-| LDR                      | Sensor digital que mede a temperatura e a umidade do ambiente.  | <div align="center">![LDR](./images/sensorLuz.jpeg)</div> |
+| LDR                      | Sensor digital que mede a luminosidade do ambiente.  | <div align="center">![LDR](./images/sensorLuz.jpeg)</div> |
 | Resistor de 10KΩ          | Os resistores possuem o papel de proteger os componentes de possíveis excessos de corrente e dividir a tensão do circuito, de modo que, fossem criadas leituras precisas de sinais analógicos. | <div align="center">![Resistor](./images/resistor.jfif)</div> |
 | Jumpers                  | Conectar fisicamente os componentes.                                  | <div align="center">![Jumpers](./images/jumpers.jfif)</div> |
 | Aparelho de acesso à internet | 
@@ -25,9 +25,7 @@ O projeto trabalha com as seguintes variáveis em seus respectivos intervalor e 
 ### Conexões
 | Componente  | Conexão                                                     |
 |-------------|-------------------------------------------------------------|
-| DHT11       | Pino de dados (DHT11) - Pino 15 (ESP32)                     |
-|             | VCC (DHT11)                                                 |
-|             | GND (DHT11)                                                 |
+| DHT11       | Pino de dados (DHT11) - Pino 15 (ESP32) <br> VCC (DHT11) <br>  GND (DHT11)|
 | LDR         | Pino de saída (LDR) – Pino 34 (ESP32)                       |
 
 ### Diagrama Elétrico
@@ -341,20 +339,362 @@ triggerMaxUmi = 50
 ```
 #### Funções de Aquisição e Processamento de Dados
 •	get_data(lastN, dataType): Obtém dados do servidor para um tipo específico de dado (luminosity, temperature, ou humidity), consultando os últimos valores com base no parâmetro lastN.<br>
+```phyton
+# Function to get data from the API
+def get_data(lastN,dataType):
+
+    
+    #call api data
+    url = f"http://{IP_ADDRESS}:{PORT_STH}/STH/v1/contextEntities/type/Lamp/id/urn:ngsi-ld:Lamp:{lamp}/attributes/{dataType}?lastN={lastN}"
+    headers = {
+        'fiware-service': 'smart',
+        'fiware-servicepath': '/'
+    }
+    lastN = 1
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        data = response.json()
+        try:
+            values = data['contextResponses'][0]['contextElement']['attributes'][0]['values']
+            return values
+        except KeyError as e:
+            print(f"Key error: {e}")
+            return []
+    else:
+        print(f"Error accessing {url}: {response.status_code}")
+        return []
+```
 •	turn_light():Ativa ou desativa a lâmpada dependendo do estado dos sensores. Se qualquer um dos sensores indicar valores fora do limite, a lâmpada é ligada; caso contrário, permanece desligada.<br>
+```phyton
+def turn_light():
+    global ErroLuz, ErroTemp, ErroUmi
+
+    url = f"http://{IP_ADDRESS}:1026/v2/entities/urn:ngsi-ld:Lamp:{lamp}/attrs"
+    headers = {
+        'fiware-service': 'smart',
+        'fiware-servicepath': '/',
+        'Content-Type': 'application/json'  # Adicione este cabeçalho
+    }
+
+    if (ErroLuz == False and ErroUmi == False and ErroTemp == False):
+        estado = "off"
+    else:
+        estado = "on"
+
+    # Defina o corpo da requisição
+    payload = {
+        f"{estado}": {
+            "type": "command",
+            "value": ""
+        }
+    }
+    requests.patch(url, headers=headers, data=json.dumps(payload))
+
+```
 •	convert_to_sao_paulo_time(timestamps): Converte carimbos de data/hora do formato UTC para o fuso horário de São Paulo.<br>
+```phyton
+# Function to convert UTC timestamps to São Paulo time
+
+
+def convert_to_sao_paulo_time(timestamps):
+    utc = pytz.utc
+    lisbon = pytz.timezone('America/Sao_Paulo')
+    converted_timestamps = []
+    for timestamp in timestamps:
+        try:
+            timestamp = timestamp.replace('T', ' ').replace('Z', '')
+            converted_time = utc.localize(datetime.strptime(
+                timestamp, '%Y-%m-%d %H:%M:%S.%f')).astimezone(lisbon)
+        except ValueError:
+            # Handle case where milliseconds are not present
+            converted_time = utc.localize(datetime.strptime(
+                timestamp, '%Y-%m-%d %H:%M:%S')).astimezone(lisbon)
+        converted_timestamps.append(converted_time)
+    return converted_timestamps
+```
 #### Layout do Painel e Armazenamento de Dados
 O layout é definido com html.Div e dcc.Graph para cada gráfico (luminosidade, temperatura, umidade). Armazenamos os dados em dcc.Store, permitindo o acesso em callbacks.
 #### Callbacks e Atualização de Gráficos
 •	Atualização de Dados: O callback update_data_store atualiza as variáveis de luminosidade, temperatura e umidade a cada 10 segundos. Verifica também se os valores estão dentro do limite e ajusta o estado de erro para cada variável.<br>
+```phyton
+def update_data_store(n, luminosity_data, temperature_data, humidity_data):
+    global erroMaxTemp, erroMinTemp, valorDentroLimiteTemp
+    global erroMaxLum, erroMinLum, valorDentroLimiteLum
+    global erroMaxUmi, erroMinUmi, valorDentroLimiteUmi
+    global ErroLuz, ErroTemp, ErroUmi
+
+    luminosity_data = generic_update_data_store(
+        n, luminosity_data, "luminosity")
+
+    temperature_data = generic_update_data_store(
+        n, temperature_data, "temperature")
+
+    humidity_data = generic_update_data_store(n, humidity_data, "humidity")
+
+    if temperature_data:
+
+        if temperature_data["temperature_values"][-1] > triggerMaxTemp:
+            ErroTemp = True
+            erroMaxTemp += 1
+        elif temperature_data["temperature_values"][-1] < triggerMinTemp:
+            ErroTemp = True
+            erroMinTemp += 1
+        else:
+            ErroTemp = False
+            valorDentroLimiteTemp += 1
+
+    if luminosity_data:
+
+        if luminosity_data["luminosity_values"][-1] > triggerMaxLum:
+            ErroLuz = True
+            erroMaxLum += 1
+        elif luminosity_data["luminosity_values"][-1] < triggerMinLum:
+            ErroLuz = True
+            erroMinLum += 1
+        else:
+            ErroLuz = False
+            valorDentroLimiteLum += 1
+
+    if humidity_data:
+
+        if humidity_data["humidity_values"][-1] > triggerMaxUmi:
+            ErroUmi = True
+            erroMaxUmi += 1
+        elif humidity_data["humidity_values"][-1] < triggerMinUmi:
+            ErroUmi = True
+            erroMinUmi += 1
+        else:
+            ErroUmi = False
+            valorDentroLimiteUmi += 1
+    turn_light()
+    return luminosity_data, temperature_data, humidity_data
+
+```
 •	Gráficos de Linha: O callback update_graph atualiza os gráficos de linha para mostrar os dados recentes dos sensores.<br>
+```phyton
+def update_graph(luminosity_data, temperature_data, humidity_data):
+    fig_luminosity = generic_update_graph(
+        luminosity_data, "luminosity", "Luminosidade", "orange")
+    fig_temperature = generic_update_graph(
+        temperature_data, "temperature", "Temperatura", "red")
+    fig_humidity = generic_update_graph(
+        humidity_data, "humidity", "Umidade", "yellow")
+
+    return fig_luminosity, fig_temperature, fig_humidity
+```
 •	Gráficos de Barras e Pizza: updateErroGraph e UpdatePieGraph exibem a distribuição de valores dentro e fora dos limites.<br>
+```phyton
+def updateErroGraph(n):
+    luminosity_histogram = generic_updateErroGraph(
+        [valorDentroLimiteLum, erroMaxLum, erroMinLum])
+    temperature_histogram = generic_updateErroGraph(
+        [valorDentroLimiteTemp, erroMaxTemp, erroMinTemp])
+    humidity_histogram = generic_updateErroGraph(
+        [valorDentroLimiteUmi, erroMaxUmi, erroMinUmi])
+    return luminosity_histogram, temperature_histogram, humidity_histogram
+```
+<br>
+
+```phyton
+def UpdatePieGraph(n):
+    luminosity_pie = generic_UpdatePieGraph(
+        [valorDentroLimiteLum, erroMaxLum, erroMinLum])
+    temperature_pie = generic_UpdatePieGraph(
+        [valorDentroLimiteTemp, erroMaxTemp, erroMinTemp])
+    humidity_pie = generic_UpdatePieGraph(
+        [valorDentroLimiteUmi, erroMaxUmi, erroMinUmi])
+
+    return luminosity_pie, temperature_pie, humidity_pie
+```
 #### Funções de Atualização
 •	generic_update_data_store: Armazena dados para o tipo especificado (luminosidade, temperatura, umidade) e atualiza o estado da variável.<br>
+```phyton
+# create data store for other datas
+
+
+def generic_update_data_store(n, stored_data, dataType):
+    # Get luminosity data
+    data = get_data(lastN, dataType)
+
+    if data:
+        # Extract values and timestamps
+        data_values = [float(entry['attrValue'])
+                       for entry in data]  # Ensure values are floats
+        timestamps = [entry['recvTime'] for entry in data]
+
+
+
+        # Convert timestamps to Lisbon time
+        timestamps = convert_to_sao_paulo_time(timestamps)
+
+        # Append the new average and the latest timestamp to stored data
+
+        stored_data['timestamps'].extend(timestamps) # Store only the latest timestamp
+        stored_data[f'{dataType}_values'].extend(data_values)  # Store the average luminosity
+
+        return stored_data
+    return stored_data
+```
 •	generic_update_graph: Configura e estiliza os gráficos de linha.<br>
+```phyton
+#update the graph for others data
+def generic_update_graph(stored_data, data_type, name, data_color):
+    if stored_data['timestamps'] and stored_data[f'{data_type}_values']:
+        mean = sum(stored_data[f"{data_type}_values"]) / len(stored_data[f'{data_type}_values'])
+
+        # Inserir um valor None entre o último e o primeiro ponto
+        x_data = stored_data['timestamps'] + [None]
+        y_data = stored_data[f'{data_type}_values'] + [None]
+
+        # Cria a trace para o gráfico
+        trace_average = go.Scatter(
+            x=x_data,
+            y=y_data,
+            mode='lines+markers',
+            name=f'{name}',
+            line=dict(color=data_color)
+        )
+        
+        trace_mean = go.Scatter(
+            x=[stored_data['timestamps'][0], stored_data['timestamps'][-1]],
+            y=[mean, mean],
+            mode='lines',
+            name='Mean',
+            line=dict(color='blue', dash='dash')
+        )
+
+        # Cria a figura
+        fig_data = go.Figure(data=[trace_average, trace_mean])
+
+        # Atualiza o layout
+        fig_data.update_layout(
+            title=f'{name}',
+            xaxis_title='Timestamp',
+            yaxis_title=f'{data_type}',
+            paper_bgcolor='lightblue',
+            hovermode='closest'
+        )
+
+        return fig_data
+
+    return {}
+
+```
 •	generic_updateErroGraph: Cria gráficos de barra para visualizar quantidades dentro e fora dos limites.<br>
+```phyton
+def generic_updateErroGraph(quantidades):
+    # Criar um DataFrame com as quantidades
+    categorias = ['Dentro do limite', 'Acima do limite', 'Abaixo do limite']
+
+    df = pd.DataFrame({
+        'Categoria': categorias,
+        'Quantidade': quantidades
+    })
+
+    # Criar o gráfico de barras
+    fig_histogram = px.bar(
+        df, x='Categoria', y='Quantidade', text='Quantidade')
+
+    fig_histogram.update_layout(
+        title='Quantidade de valores dentro e fora do limite',
+        yaxis_title='Quantidade',
+        paper_bgcolor='lightblue',
+        yaxis=dict(title='Quantidade', autorange=True)
+    )
+
+    return fig_histogram
+```
 •	generic_UpdatePieGraph: Exibe um gráfico de pizza para ilustrar a proporção de valores dentro e fora dos limites.<br>
+```phyton
+def generic_UpdatePieGraph(valores):
+    # Cria os dados com as categorias e valores desejados
+    ErroTotal = valores[1] + valores[2]
+    Total = valores[0] + ErroTotal
+    if Total == 0:
+        Total = 1
+    data = {
+        "names": ["Dentro do Limite", "Fora do limite"],
+        "values": [valores[0]*100/Total, ErroTotal*100/Total]
+    }
+
+    # Converte o dicionário em um DataFrame
+    df = pd.DataFrame(data)
+
+    # Gera o gráfico de pizza
+    fig = px.pie(df, values="values", names="names", hole=.3)
+    fig.update_layout(paper_bgcolor='lightblue')
+    return fig
+```
 Essas funções são generalizadas para lidar com os três tipos de dados e permitem adicionar novos tipos de sensores com facilidade.<br>
+
+####Layout
+O layout do aplicativo é definido em uma estrutura de html.Div, com componentes armazenados para monitoramento e exibição de dados.<br>
+•	Três componentes dcc.Store são utilizados para armazenar dados históricos de luminosidade, temperatura e umidade:
+```phyton
+# Store to hold historical data
+    dcc.Store(id='luminosity-data-store',
+              data={'timestamps': [], 'luminosity_values': []}),
+    dcc.Store(id='temperature-data-store',
+              data={'timestamps': [], 'temperature_values': []}),
+    dcc.Store(id='humidity-data-store',
+              data={'timestamps': [], 'humidity_values': []}),
+```
+•	O título "ESP 32 Data Viewer" é exibido no topo da página com estilização personalizada:
+```phyton
+html.H1('ESP 32 Data Viewer', style={
+            'color': 'darkblue', 'font-size': '60px', 'margin-left': '20px', 'padding-top': '20px', 'font-family': 'Consolas', 'font-weight': 1100}),
+```
+•	Cada tipo de dado (luminosidade, temperatura, umidade) é exibido em uma seção separada, contendo: título da secção, gráficos de linha, gráficos de erro e pizza.
+```phyton
+html.Div([
+        html.H2('Dados de Luminosidade', style={
+                'color': 'darkblue', 'font-size': '40px', 'margin-left': '30px', 'margin-top': '20px', 'font-family': 'Consolas', 'font-weight': 800}),
+        dcc.Graph(id='luminosity-graph'),
+        dbc.Row([
+            dbc.Col(dcc.Graph(id='luminosity-ErrorData-graph'), width=6),
+            dbc.Col(dcc.Graph(id='luminosity-Pie-graph'), width=6)
+        ])
+    ],
+    ),
+
+    # Div for temperature dashboard
+    html.Div([
+        html.H2('Dados de Temperatura', style={
+            'color': 'darkblue', 'font-size': '40px', 'margin-left': '30px', 'margin-top': '20px', 'font-family': 'Consolas', 'font-weight': 800}),
+        dcc.Graph(id='temperature-graph'),
+        dbc.Row([
+                dbc.Col(dcc.Graph(id='temperature-ErrorData-graph'), width=6),
+                dbc.Col(dcc.Graph(id='temperature-Pie-graph'), width=6)
+                ])
+
+    ]),
+
+    # Div for humidity dashboard
+    html.Div([
+        html.H2('Dados de Umidade', style={
+            'color': 'darkblue', 'font-size': '40px', 'margin-left': '30px', 'margin-top': '20px', 'font-family': 'Consolas', 'font-weight': 800}),
+        dcc.Graph(id='humidity-graph'),
+        dbc.Row([
+                dbc.Col(dcc.Graph(id='humidity-ErrorData-graph'), width=6),
+                dbc.Col(dcc.Graph(id='humidity-Pie-graph'), width=6)
+
+                ])
+
+    ]),
+```
+•	A atualização automática dos dados ocorre a cada 10 segundos, definida pelo componente dcc.Interval
+```phyton
+    # Update site
+    dcc.Interval(
+        id='interval-component',
+        interval=10*1000,  # in milliseconds (10 seconds)
+        n_intervals=0
+    )
+```
+•	Um fundo azul claro é aplicado a todo o layout para melhorar a aparência visual:
+```phyton
+style={'background-color': 'lightblue'})
+```
 ## Manual do Usuário
 Primeiro é necessário ter o equipamento ligado por uma pessoa da equipe TermoLight. Depois é necessário ter uma conexão de internet wi-fi, de 2,4GHz (necessários ser o mesmo wi-fi cadastrado pelo membro da equipe). 
 O equipamento TermoLight instalado possui dois sensores que captam luminosidade, temperatura e umidade de um ambiente, e transferidos instantaneamente para nuvem através de um ESP32 (conector wi-fi). Destes, um sensor de luminosidade LDR, conectado a um resistor de 10kOhms, e um sensor de temperatura e umidade DHT11. 
